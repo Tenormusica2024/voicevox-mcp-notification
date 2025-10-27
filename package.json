@@ -1,0 +1,30 @@
+{
+  "name": "@tenormusica/mcp-voicevox-notification",
+  "version": "1.0.0",
+  "description": "VOICEVOX MCP Server for Claude Code voice notifications",
+  "main": "index.js",
+  "type": "module",
+  "bin": {
+    "mcp-voicevox": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "mcp",
+    "voicevox",
+    "claude-code",
+    "voice-notification",
+    "text-to-speech"
+  ],
+  "author": "Urayaha Days",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.20.2",
+    "node-fetch": "^3.3.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
