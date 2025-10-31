@@ -16,6 +16,7 @@ class ZundamonVoiceController {
     this.isPlaying = false; // 再生中フラグ（同時再生防止）
     this.processingQueue = []; // 処理待ちキュー
     this.prefetchedAudio = null; // プリフェッチ済み音声データ
+    this.prefetchInProgress = false; // プリフェッチ実行中フラグ
     
     this.init();
   }
@@ -136,38 +137,20 @@ class ZundamonVoiceController {
   
   processClaudeMessage(element) {
     // 処理済み要素をスキップ
-    if (this.processedElements.has(element)) {
-      console.log('⏭️ 処理済み要素をスキップ');
-      return;
-    }
+    if (this.processedElements.has(element)) return;
     this.processedElements.add(element);
     
     const text = this.extractText(element);
-    console.log('🔍 抽出されたテキスト:', text ? `"${text.substring(0, 100)}"` : '(空)');
-    
-    if (!text || text === this.lastProcessedText) {
-      console.log('❌ テキストが空または重複:', { isEmpty: !text, isDuplicate: text === this.lastProcessedText });
-      return;
-    }
+    if (!text || text === this.lastProcessedText) return;
     
     const textToSpeak = this.summarizeIfNeeded(text);
-    console.log('📝 要約後のテキスト:', textToSpeak.length, '文字');
+    if (textToSpeak.length === 0) return;
     
-    if (textToSpeak.length > 0) {
-      this.lastProcessedText = text;
-      console.log('🗣️ 読み上げ開始:', textToSpeak.substring(0, 50));
-      
-      // 長文の場合は分割して段階的に読み上げ
-      const chunks = this.splitTextForReading(textToSpeak);
-      console.log(`📦 テキストを${chunks.length}個に分割して読み上げます`);
-      
-      chunks.forEach((chunk, index) => {
-        console.log(`  チャンク${index + 1}/${chunks.length}: ${chunk.length}文字`);
-        this.speakText(chunk);
-      });
-    } else {
-      console.log('❌ 要約後のテキストが空');
-    }
+    this.lastProcessedText = text;
+    
+    // 長文の場合は分割して段階的に読み上げ
+    const chunks = this.splitTextForReading(textToSpeak);
+    chunks.forEach(chunk => this.speakText(chunk));
   }
   
   splitTextForReading(text) {
@@ -248,36 +231,26 @@ class ZundamonVoiceController {
     });
     
     let text = clone.textContent.trim();
-    console.log('📝 extractText: 初期テキスト:', text.substring(0, 200), `(全${text.length}文字)`);
     
     // 思考プロセス部分を正規表現で削除（文字列全体から）
-    // 「考え中...」から最初の日本語の挨拶までを削除
     text = text.replace(/考え中[\s\S]*?(?=[ぁ-んァ-ヶー][ぁ-んァ-ヶーー一-龠]{2,})/g, '');
-    
-    // 思考プロセス全体を一括削除（文の終わりまで続く思考プロセスブロック）
-    // 「ユーザーが〜」で始まり、実際の応答（「そうですね」「はい」など）までの全テキストを削除
     text = text.replace(/ユーザー[がはに].+?(?=そうですね|はい|いいえ|ありがとう|わかりました|こんにちは|こんばんは|おはよう|では|それでは)/gs, '');
     
     // 英語・日本語混合の思考プロセス文を個別に削除
     const thinkingPatterns = [
-      // 英語の思考プロセス
       /The user is .+?\./g,
       /The user has .+?\./g,
       /The user wrote .+?\./g,
       /I should .+?\./g,
       /Since .+?\./g,
       /This is .+?\./g,
-      // 日本語の思考プロセス（「ユーザーは」「ユーザーが」で始まる文）
       /ユーザーは.+?[。\.]/g,
       /ユーザーが.+?[。\.]/g,
       /ユーザーに.+?[。\.]/g,
-      // 「これは」「それは」などで始まる説明文（思考プロセスの続き）
       /これは.+?[。\.]/g,
       /それは.+?[。\.]/g,
       /自然な.+?[。\.]/g,
-      // 場所情報の言及
       /ユーザーの場所は.+?[。\.]/g,
-      // 思考プロセス特有のフレーズ（断片削除）
       /.+?と返答しました[。\.]?/g,
       /.+?のようです[。\.]?/g,
       /.+?が良さそうです[。\.]?/g,
@@ -285,7 +258,6 @@ class ZundamonVoiceController {
       /何か具体的な.+?[。\.]/g,
       /何か.+?のようなので、.+?[。\.]/g,
       /無理に.+?[。\.]/g,
-      // その他の思考プロセスパターン
       /考えていること.+?[。\.]/g,
       /思考プロセス.+?[。\.]/g
     ];
@@ -294,42 +266,25 @@ class ZundamonVoiceController {
       text = text.replace(pattern, '');
     });
     
-    console.log('🧹 extractText: 思考ブロック削除後:', text.substring(0, 200), `(全${text.length}文字)`);
-    
     // UI要素のテキストを削除
     const uiTexts = ['再試行', 'Retry', 'コピー', 'Copy'];
     uiTexts.forEach(uiText => {
       text = text.replace(new RegExp(uiText, 'g'), '');
     });
     
-    console.log('🎨 extractText: UI要素削除後:', text.substring(0, 200), `(全${text.length}文字)`);
-    
     // 複数の改行・空白を整理
     text = text.replace(/\n{2,}/g, '\n').replace(/\s{2,}/g, ' ').trim();
     
-    console.log('✂️ extractText: 改行整理後:', text.substring(0, 200), `(全${text.length}文字)`);
-    
     // 空白のみのテキストを除外
-    if (text.length === 0) {
-      console.log('⚠️ extractText: 空のテキスト');
-      return '';
-    }
+    if (text.length === 0) return '';
     
     // 日本語が含まれているか確認
     const hasJapanese = /[ぁ-んァ-ヶー一-龠]/.test(text);
-    if (!hasJapanese) {
-      console.log('⚠️ extractText: 日本語が含まれていないためスキップ');
-      return '';
-    }
+    if (!hasJapanese) return '';
     
     // 短すぎるテキストを除外（3文字未満）
-    if (text.length < 3) {
-      console.log('⚠️ extractText: テキストが短すぎる:', text.length, '文字');
-      return '';
-    }
+    if (text.length < 3) return '';
     
-    console.log('✅ extractText: 最終テキスト:', text.substring(0, 100), `(全${text.length}文字) ← これがreturnされます`);
-    console.log('📊 extractText: 完全なテキスト:', text);
     return text;
   }
   
@@ -341,7 +296,6 @@ class ZundamonVoiceController {
   async speakText(text) {
     // 既に再生中の場合はキューに追加
     if (this.isPlaying) {
-      console.log('⏳ 音声再生中のためキューに追加:', text.substring(0, 30));
       this.processingQueue.push(text);
       return;
     }
@@ -349,8 +303,6 @@ class ZundamonVoiceController {
     this.isPlaying = true;
     
     try {
-      console.log(`🔊 音声合成開始: ${text}`);
-      
       // Background Service Worker経由でAPI呼び出し
       const result = await this.synthesizeViaBackground(text);
       
@@ -358,30 +310,28 @@ class ZundamonVoiceController {
         throw new Error(result.error);
       }
       
+      // ArrayBufferに変換
+      const audioData = new Uint8Array(result.audioData).buffer;
+      
       // 音声合成完了時点で次のチャンクの合成を先行開始（プリフェッチ）
-      if (this.processingQueue.length > 0) {
-        console.log('🚀 次のチャンクの音声合成を先行開始');
-        const nextText = this.processingQueue[0]; // shift()せず参照のみ
+      if (this.processingQueue.length > 0 && !this.prefetchInProgress) {
+        this.prefetchInProgress = true;
+        const nextText = this.processingQueue[0];
         this.synthesizeViaBackground(nextText).then(nextResult => {
           if (nextResult.success) {
             this.prefetchedAudio = {
               text: nextText,
               audioData: new Uint8Array(nextResult.audioData).buffer
             };
-            console.log('✅ 次のチャンク音声合成完了（プリフェッチ済み）');
           }
-        }).catch(err => {
-          console.error('❌ プリフェッチエラー:', err);
+          this.prefetchInProgress = false;
+        }).catch(() => {
+          this.prefetchInProgress = false;
         });
       }
       
-      // ArrayBufferに変換
-      const audioData = new Uint8Array(result.audioData).buffer;
-      
       // 再生
       await this.playAudio(audioData);
-      
-      console.log('✅ 音声再生完了');
       
     } catch (error) {
       console.error('❌ 音声合成エラー:', error);
@@ -391,31 +341,42 @@ class ZundamonVoiceController {
       // キューに残っているテキストがあれば次を再生
       if (this.processingQueue.length > 0) {
         const nextText = this.processingQueue.shift();
-        console.log('📤 キューから次のテキストを再生:', nextText.substring(0, 30));
         
         // プリフェッチ済みの場合は即座に再生
         if (this.prefetchedAudio && this.prefetchedAudio.text === nextText) {
-          console.log('⚡ プリフェッチ済み音声を使用');
           this.isPlaying = true;
-          this.playAudio(this.prefetchedAudio.audioData)
+          const cachedAudio = this.prefetchedAudio.audioData;
+          this.prefetchedAudio = null;
+          
+          // 次のチャンクをプリフェッチ
+          if (this.processingQueue.length > 0 && !this.prefetchInProgress) {
+            this.prefetchInProgress = true;
+            const followingText = this.processingQueue[0];
+            this.synthesizeViaBackground(followingText).then(result => {
+              if (result.success) {
+                this.prefetchedAudio = {
+                  text: followingText,
+                  audioData: new Uint8Array(result.audioData).buffer
+                };
+              }
+              this.prefetchInProgress = false;
+            }).catch(() => {
+              this.prefetchInProgress = false;
+            });
+          }
+          
+          this.playAudio(cachedAudio)
             .then(() => {
-              console.log('✅ 音声再生完了');
               this.isPlaying = false;
-              this.prefetchedAudio = null;
-              
-              // さらに次のテキストがあれば再生
               if (this.processingQueue.length > 0) {
-                const followingText = this.processingQueue.shift();
-                this.speakText(followingText);
+                this.speakText(this.processingQueue.shift());
               }
             })
             .catch(err => {
               console.error('❌ 音声再生エラー:', err);
               this.isPlaying = false;
-              this.prefetchedAudio = null;
             });
         } else {
-          // プリフェッチがない場合は通常通り
           this.prefetchedAudio = null;
           this.speakText(nextText);
         }
@@ -425,17 +386,12 @@ class ZundamonVoiceController {
   
   async synthesizeViaBackground(text) {
     return new Promise((resolve) => {
-      console.log('🔧 [Content] メッセージ送信前:', { action: 'synthesize', text, speakerID: this.speakerID });
-      
       chrome.runtime.sendMessage({
         action: 'synthesize',
         text: text,
         speakerID: this.speakerID
       }, (response) => {
-        console.log('🔧 [Content] メッセージ送信後 レスポンス:', response);
-        
         if (chrome.runtime.lastError) {
-          console.error('❌ [Content] chrome.runtime.lastError:', chrome.runtime.lastError);
           resolve({ success: false, error: chrome.runtime.lastError.message });
         } else {
           resolve(response || { success: false, error: 'No response' });
