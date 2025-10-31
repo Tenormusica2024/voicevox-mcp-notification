@@ -403,15 +403,16 @@ class ZundamonVoiceController {
       timeoutId = setTimeout(() => {
         if (!messageCompleted) {
           messageCompleted = true;
-          console.error('❌ メッセージポートタイムアウト（25秒）');
           
-          // リトライ可能な場合は再試行
+          // リトライ可能な場合は再試行（警告レベル）
           if (retryCount < MAX_RETRIES) {
-            console.log(`🔄 音声合成を再試行します (${retryCount + 1}/${MAX_RETRIES})`);
+            console.warn(`⚠️ メッセージポートタイムアウト（25秒）、再試行します (${retryCount + 1}/${MAX_RETRIES})`);
             this.synthesizeViaBackground(text, retryCount + 1)
               .then(resolve)
               .catch(() => resolve({ success: false, error: 'Timeout after retry' }));
           } else {
+            // リトライ後も失敗した場合のみエラー表示
+            console.error('❌ メッセージポートタイムアウト（リトライ後も失敗）');
             resolve({ success: false, error: 'Message port timeout' });
           }
         }
@@ -438,15 +439,15 @@ class ZundamonVoiceController {
                 return;
               }
               
-              console.error('❌ Chrome拡張エラー:', errorMsg);
-              
-              // "message port closed" エラーの場合はリトライ
+              // "message port closed" エラーの場合はリトライ（警告レベル）
               if (errorMsg.includes('message port closed') && retryCount < MAX_RETRIES) {
-                console.log(`🔄 音声合成を再試行します (${retryCount + 1}/${MAX_RETRIES})`);
+                console.warn(`⚠️ Chrome拡張エラー（${errorMsg}）、再試行します (${retryCount + 1}/${MAX_RETRIES})`);
                 this.synthesizeViaBackground(text, retryCount + 1)
                   .then(resolve)
                   .catch(() => resolve({ success: false, error: errorMsg }));
               } else {
+                // リトライ後も失敗した場合のみエラー表示
+                console.error('❌ Chrome拡張エラー（リトライ後も失敗）:', errorMsg);
                 resolve({ success: false, error: errorMsg });
               }
             } else {
