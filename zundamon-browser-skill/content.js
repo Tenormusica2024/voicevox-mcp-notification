@@ -388,6 +388,13 @@ class ZundamonVoiceController {
     const MAX_RETRIES = 1;
     const TIMEOUT_MS = 25000; // 25秒でタイムアウト（Chrome拡張の30秒制限より短く設定）
     
+    // Extension context無効化チェック
+    if (!chrome.runtime?.id) {
+      console.warn('⚠️ 拡張機能のコンテキストが無効化されています。音声読み上げを停止します。');
+      this.isEnabled = false;
+      return { success: false, error: 'Extension context invalidated', fatal: true };
+    }
+    
     return new Promise((resolve) => {
       let timeoutId;
       let messageCompleted = false;
@@ -410,33 +417,50 @@ class ZundamonVoiceController {
         }
       }, TIMEOUT_MS);
       
-      chrome.runtime.sendMessage({
-        action: 'synthesize',
-        text: text,
-        speakerID: this.speakerID
-      }, (response) => {
-        if (!messageCompleted) {
-          messageCompleted = true;
-          clearTimeout(timeoutId);
-          
-          if (chrome.runtime.lastError) {
-            const errorMsg = chrome.runtime.lastError.message;
-            console.error('❌ Chrome拡張エラー:', errorMsg);
+      try {
+        chrome.runtime.sendMessage({
+          action: 'synthesize',
+          text: text,
+          speakerID: this.speakerID
+        }, (response) => {
+          if (!messageCompleted) {
+            messageCompleted = true;
+            clearTimeout(timeoutId);
             
-            // "message port closed" エラーの場合はリトライ
-            if (errorMsg.includes('message port closed') && retryCount < MAX_RETRIES) {
-              console.log(`🔄 音声合成を再試行します (${retryCount + 1}/${MAX_RETRIES})`);
-              this.synthesizeViaBackground(text, retryCount + 1)
-                .then(resolve)
-                .catch(() => resolve({ success: false, error: errorMsg }));
+            if (chrome.runtime.lastError) {
+              const errorMsg = chrome.runtime.lastError.message;
+              
+              // Extension context invalidated エラーの場合は致命的エラーとして処理
+              if (errorMsg.includes('Extension context invalidated')) {
+                console.warn('⚠️ 拡張機能が再読み込みされました。音声読み上げを停止します。');
+                this.isEnabled = false;
+                resolve({ success: false, error: errorMsg, fatal: true });
+                return;
+              }
+              
+              console.error('❌ Chrome拡張エラー:', errorMsg);
+              
+              // "message port closed" エラーの場合はリトライ
+              if (errorMsg.includes('message port closed') && retryCount < MAX_RETRIES) {
+                console.log(`🔄 音声合成を再試行します (${retryCount + 1}/${MAX_RETRIES})`);
+                this.synthesizeViaBackground(text, retryCount + 1)
+                  .then(resolve)
+                  .catch(() => resolve({ success: false, error: errorMsg }));
+              } else {
+                resolve({ success: false, error: errorMsg });
+              }
             } else {
-              resolve({ success: false, error: errorMsg });
+              resolve(response || { success: false, error: 'No response' });
             }
-          } else {
-            resolve(response || { success: false, error: 'No response' });
           }
-        }
-      });
+        });
+      } catch (error) {
+        messageCompleted = true;
+        clearTimeout(timeoutId);
+        console.warn('⚠️ メッセージ送信時にエラーが発生しました:', error.message);
+        this.isEnabled = false;
+        resolve({ success: false, error: error.message, fatal: true });
+      }
     });
   }
   
