@@ -189,7 +189,7 @@ class ZundamonVoiceController {
     });
     
     let text = clone.textContent.trim();
-    console.log('📝 extractText: 初期テキスト:', text.substring(0, 200));
+    console.log('📝 extractText: 初期テキスト:', text.substring(0, 200), `(全${text.length}文字)`);
     
     // 思考プロセス部分を正規表現で削除（文字列全体から）
     // 「考え中...」から最初の日本語の挨拶までを削除
@@ -235,7 +235,7 @@ class ZundamonVoiceController {
       text = text.replace(pattern, '');
     });
     
-    console.log('🧹 extractText: 思考ブロック削除後:', text.substring(0, 200));
+    console.log('🧹 extractText: 思考ブロック削除後:', text.substring(0, 200), `(全${text.length}文字)`);
     
     // UI要素のテキストを削除
     const uiTexts = ['再試行', 'Retry', 'コピー', 'Copy'];
@@ -243,8 +243,12 @@ class ZundamonVoiceController {
       text = text.replace(new RegExp(uiText, 'g'), '');
     });
     
+    console.log('🎨 extractText: UI要素削除後:', text.substring(0, 200), `(全${text.length}文字)`);
+    
     // 複数の改行・空白を整理
     text = text.replace(/\n{2,}/g, '\n').replace(/\s{2,}/g, ' ').trim();
+    
+    console.log('✂️ extractText: 改行整理後:', text.substring(0, 200), `(全${text.length}文字)`);
     
     // 空白のみのテキストを除外
     if (text.length === 0) {
@@ -265,7 +269,8 @@ class ZundamonVoiceController {
       return '';
     }
     
-    console.log('✅ extractText: 最終テキスト:', text.substring(0, 100));
+    console.log('✅ extractText: 最終テキスト:', text.substring(0, 100), `(全${text.length}文字) ← これがreturnされます`);
+    console.log('📊 extractText: 完全なテキスト:', text);
     return text;
   }
   
