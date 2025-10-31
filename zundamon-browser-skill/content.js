@@ -374,7 +374,7 @@ class ZundamonVoiceController {
       if (this.processingQueue.length > 0) {
         const nextText = this.processingQueue.shift();
         console.log('📤 キューから次のテキストを再生:', nextText.substring(0, 30));
-        setTimeout(() => this.speakText(nextText), 100); // 100ms待機してから次を再生
+        this.speakText(nextText); // 即座に次を再生
       }
     }
   }
