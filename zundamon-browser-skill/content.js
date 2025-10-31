@@ -318,6 +318,10 @@ class ZundamonVoiceController {
       const result = await this.synthesizeViaBackground(text);
       
       if (!result.success) {
+        // Extension context無効化などの致命的エラーは静かに終了
+        if (result.fatal) {
+          return;
+        }
         throw new Error(result.error);
       }
       
