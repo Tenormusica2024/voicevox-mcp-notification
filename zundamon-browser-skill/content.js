@@ -15,6 +15,7 @@ class ZundamonVoiceController {
     this.processedElements = new WeakSet();
     this.isPlaying = false; // 再生中フラグ（同時再生防止）
     this.processingQueue = []; // 処理待ちキュー
+    this.prefetchedAudio = null; // プリフェッチ済み音声データ
     
     this.init();
   }
@@ -357,6 +358,23 @@ class ZundamonVoiceController {
         throw new Error(result.error);
       }
       
+      // 音声合成完了時点で次のチャンクの合成を先行開始（プリフェッチ）
+      if (this.processingQueue.length > 0) {
+        console.log('🚀 次のチャンクの音声合成を先行開始');
+        const nextText = this.processingQueue[0]; // shift()せず参照のみ
+        this.synthesizeViaBackground(nextText).then(nextResult => {
+          if (nextResult.success) {
+            this.prefetchedAudio = {
+              text: nextText,
+              audioData: new Uint8Array(nextResult.audioData).buffer
+            };
+            console.log('✅ 次のチャンク音声合成完了（プリフェッチ済み）');
+          }
+        }).catch(err => {
+          console.error('❌ プリフェッチエラー:', err);
+        });
+      }
+      
       // ArrayBufferに変換
       const audioData = new Uint8Array(result.audioData).buffer;
       
@@ -374,7 +392,33 @@ class ZundamonVoiceController {
       if (this.processingQueue.length > 0) {
         const nextText = this.processingQueue.shift();
         console.log('📤 キューから次のテキストを再生:', nextText.substring(0, 30));
-        this.speakText(nextText); // 即座に次を再生
+        
+        // プリフェッチ済みの場合は即座に再生
+        if (this.prefetchedAudio && this.prefetchedAudio.text === nextText) {
+          console.log('⚡ プリフェッチ済み音声を使用');
+          this.isPlaying = true;
+          this.playAudio(this.prefetchedAudio.audioData)
+            .then(() => {
+              console.log('✅ 音声再生完了');
+              this.isPlaying = false;
+              this.prefetchedAudio = null;
+              
+              // さらに次のテキストがあれば再生
+              if (this.processingQueue.length > 0) {
+                const followingText = this.processingQueue.shift();
+                this.speakText(followingText);
+              }
+            })
+            .catch(err => {
+              console.error('❌ 音声再生エラー:', err);
+              this.isPlaying = false;
+              this.prefetchedAudio = null;
+            });
+        } else {
+          // プリフェッチがない場合は通常通り
+          this.prefetchedAudio = null;
+          this.speakText(nextText);
+        }
       }
     }
   }
