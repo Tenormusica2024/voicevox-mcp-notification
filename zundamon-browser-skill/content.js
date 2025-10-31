@@ -270,16 +270,8 @@ class ZundamonVoiceController {
   }
   
   summarizeIfNeeded(text) {
-    if (text.length <= 100) {
-      return text;
-    }
-    
-    const firstSentence = text.split(/[。．\n]/)[0];
-    if (firstSentence.length <= 100) {
-      return firstSentence;
-    }
-    
-    return text.substring(0, 97) + '...';
+    // 全文を読み上げる（要約なし）
+    return text;
   }
   
   async speakText(text) {
