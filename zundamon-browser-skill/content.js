@@ -170,50 +170,44 @@ class ZundamonVoiceController {
   }
   
   splitTextForReading(text) {
-    // 100文字以下なら分割不要
-    if (text.length <= 100) {
+    // 50文字以下なら分割不要
+    if (text.length <= 50) {
       return [text];
     }
     
     const chunks = [];
+    const maxChunkSize = 50;
     
-    // まず改行で分割
-    const lines = text.split('\n').filter(line => line.trim().length > 0);
+    // 句点・改行・読点で分割候補を作成
+    const segments = text.split(/([。！？\n、])/);
     
     let currentChunk = '';
     
-    for (const line of lines) {
-      // 現在のチャンクに行を追加すると100文字を超える場合
-      if (currentChunk.length > 0 && (currentChunk + '\n' + line).length > 100) {
-        // 現在のチャンクを確定
-        chunks.push(currentChunk.trim());
-        currentChunk = line;
-      } else {
-        // 現在のチャンクに追加
-        if (currentChunk.length > 0) {
-          currentChunk += '\n' + line;
-        } else {
-          currentChunk = line;
-        }
-      }
+    for (let i = 0; i < segments.length; i++) {
+      const segment = segments[i];
       
-      // 1行が100文字を超える場合は句点で分割
-      if (currentChunk.length > 100) {
-        const sentences = currentChunk.split(/([。！？])/);
-        let sentenceChunk = '';
+      // 区切り文字自体は前のセグメントに結合
+      if (segment.match(/[。！？\n、]/)) {
+        currentChunk += segment;
         
-        for (let i = 0; i < sentences.length; i += 2) {
-          const sentence = sentences[i] + (sentences[i + 1] || '');
-          
-          if ((sentenceChunk + sentence).length > 100 && sentenceChunk.length > 0) {
-            chunks.push(sentenceChunk.trim());
-            sentenceChunk = sentence;
-          } else {
-            sentenceChunk += sentence;
+        // 50文字超えたら、または句点・改行の場合はチャンク確定
+        if (currentChunk.length >= maxChunkSize || segment.match(/[。！？\n]/)) {
+          if (currentChunk.trim().length > 0) {
+            chunks.push(currentChunk.trim());
+            currentChunk = '';
           }
         }
-        
-        currentChunk = sentenceChunk;
+      } else {
+        // 追加すると50文字超える場合
+        if (currentChunk.length > 0 && (currentChunk + segment).length > maxChunkSize) {
+          // 現在のチャンクを確定
+          if (currentChunk.trim().length > 0) {
+            chunks.push(currentChunk.trim());
+          }
+          currentChunk = segment;
+        } else {
+          currentChunk += segment;
+        }
       }
     }
     
