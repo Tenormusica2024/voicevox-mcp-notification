@@ -64,42 +64,76 @@ async function synthesizeVoice(text, speaker = DEFAULT_SPEAKER, speedScale = DEF
 async function playAudio(audioBuffer) {
   const { spawn } = await import('child_process');
   const os = await import('os');
+  const fs = await import('fs');
+  const path = await import('path');
   
   const platform = os.platform();
-  let command, args;
-
+  
   if (platform === 'win32') {
-    command = 'powershell';
-    args = [
-      '-Command',
-      `$player = New-Object System.Media.SoundPlayer; $player.Stream = [System.IO.MemoryStream]::new([System.Convert]::FromBase64String([System.Convert]::ToBase64String([System.IO.File]::ReadAllBytes('${process.cwd()}\\temp_audio.wav')))); $player.PlaySync()`
-    ];
-  } else if (platform === 'darwin') {
-    command = 'afplay';
-    args = ['-'];
-  } else {
-    command = 'aplay';
-    args = ['-'];
-  }
-
-  return new Promise((resolve, reject) => {
-    const player = spawn(command, args);
+    const tempFile = path.join(os.tmpdir(), `voicevox_${Date.now()}.wav`);
     
-    if (platform === 'darwin' || platform === 'linux') {
-      player.stdin.write(audioBuffer);
-      player.stdin.end();
+    return new Promise((resolve, reject) => {
+      fs.writeFile(tempFile, audioBuffer, async (err) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        
+        const command = 'powershell';
+        const args = [
+          '-Command',
+          `$player = New-Object System.Media.SoundPlayer; $player.SoundLocation = '${tempFile}'; $player.PlaySync(); Remove-Item '${tempFile}'`
+        ];
+        
+        const player = spawn(command, args);
+        
+        player.on('close', (code) => {
+          if (code === 0) {
+            resolve();
+          } else {
+            try {
+              fs.unlinkSync(tempFile);
+            } catch {}
+            reject(new Error(`Player exited with code ${code}`));
+          }
+        });
+        
+        player.on('error', (error) => {
+          try {
+            fs.unlinkSync(tempFile);
+          } catch {}
+          reject(error);
+        });
+      });
+    });
+  } else {
+    let command, args;
+    
+    if (platform === 'darwin') {
+      command = 'afplay';
+      args = ['-'];
+    } else {
+      command = 'aplay';
+      args = ['-'];
     }
 
-    player.on('close', (code) => {
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(new Error(`Player exited with code ${code}`));
-      }
-    });
+    return new Promise((resolve, reject) => {
+      const player = spawn(command, args);
+      
+      player.stdin.write(audioBuffer);
+      player.stdin.end();
 
-    player.on('error', reject);
-  });
+      player.on('close', (code) => {
+        if (code === 0) {
+          resolve();
+        } else {
+          reject(new Error(`Player exited with code ${code}`));
+        }
+      });
+
+      player.on('error', reject);
+    });
+  }
 }
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
