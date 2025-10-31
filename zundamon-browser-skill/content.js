@@ -15,8 +15,8 @@ class ZundamonVoiceController {
     this.processedElements = new WeakSet();
     this.isPlaying = false; // 再生中フラグ（同時再生防止）
     this.processingQueue = []; // 処理待ちキュー
-    this.prefetchedAudio = null; // プリフェッチ済み音声データ
-    this.prefetchInProgress = false; // プリフェッチ実行中フラグ
+    this.prefetchCache = new Map(); // プリフェッチキャッシュ（複数チャンク対応）
+    this.prefetchInProgress = new Set(); // プリフェッチ実行中のテキスト
     
     this.init();
   }
@@ -150,6 +150,13 @@ class ZundamonVoiceController {
     
     // 長文の場合は分割して段階的に読み上げ
     const chunks = this.splitTextForReading(textToSpeak);
+    
+    // 最初の3チャンクを並列でプリフェッチ（序盤の待機時間削減）
+    const prefetchCount = Math.min(3, chunks.length);
+    for (let i = 1; i < prefetchCount; i++) {
+      this.startPrefetch(chunks[i]);
+    }
+    
     chunks.forEach(chunk => this.speakText(chunk));
   }
   
@@ -298,7 +305,7 @@ class ZundamonVoiceController {
     if (this.isPlaying) {
       this.processingQueue.push(text);
       // キューに追加した瞬間に次のチャンクのプリフェッチを開始
-      if (this.processingQueue.length === 1 && !this.prefetchInProgress) {
+      if (this.processingQueue.length === 1 && !this.prefetchInProgress.has(text)) {
         this.startPrefetch(text);
       }
       return;
@@ -318,7 +325,7 @@ class ZundamonVoiceController {
       const audioData = new Uint8Array(result.audioData).buffer;
       
       // 再生開始と同時に次のチャンクをプリフェッチ
-      if (this.processingQueue.length > 0 && !this.prefetchInProgress) {
+      if (this.processingQueue.length > 0 && !this.prefetchInProgress.has(this.processingQueue[0])) {
         const nextText = this.processingQueue[0];
         this.startPrefetch(nextText);
       }
@@ -336,13 +343,13 @@ class ZundamonVoiceController {
         const nextText = this.processingQueue.shift();
         
         // プリフェッチ済みの場合は即座に再生
-        if (this.prefetchedAudio && this.prefetchedAudio.text === nextText) {
+        if (this.prefetchCache.has(nextText)) {
           this.isPlaying = true;
-          const cachedAudio = this.prefetchedAudio.audioData;
-          this.prefetchedAudio = null;
+          const cachedAudio = this.prefetchCache.get(nextText);
+          this.prefetchCache.delete(nextText);
           
           // 次のチャンクをプリフェッチ
-          if (this.processingQueue.length > 0 && !this.prefetchInProgress) {
+          if (this.processingQueue.length > 0 && !this.prefetchInProgress.has(this.processingQueue[0])) {
             const followingText = this.processingQueue[0];
             this.startPrefetch(followingText);
           }
@@ -357,7 +364,7 @@ class ZundamonVoiceController {
           }
         } else {
           // キャッシュミス - 再帰呼び出しで処理
-          this.prefetchedAudio = null;
+          this.prefetchCache.delete(nextText);
           this.speakText(nextText);
           break;
         }
@@ -366,17 +373,18 @@ class ZundamonVoiceController {
   }
   
   startPrefetch(text) {
-    this.prefetchInProgress = true;
+    if (this.prefetchInProgress.has(text) || this.prefetchCache.has(text)) {
+      return; // すでにプリフェッチ中またはキャッシュ済み
+    }
+    
+    this.prefetchInProgress.add(text);
     this.synthesizeViaBackground(text).then(result => {
       if (result.success) {
-        this.prefetchedAudio = {
-          text: text,
-          audioData: new Uint8Array(result.audioData).buffer
-        };
+        this.prefetchCache.set(text, new Uint8Array(result.audioData).buffer);
       }
-      this.prefetchInProgress = false;
+      this.prefetchInProgress.delete(text);
     }).catch(() => {
-      this.prefetchInProgress = false;
+      this.prefetchInProgress.delete(text);
     });
   }
   
