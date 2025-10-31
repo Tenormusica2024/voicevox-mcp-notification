@@ -297,6 +297,10 @@ class ZundamonVoiceController {
     // 既に再生中の場合はキューに追加
     if (this.isPlaying) {
       this.processingQueue.push(text);
+      // キューに追加した瞬間に次のチャンクのプリフェッチを開始
+      if (this.processingQueue.length === 1 && !this.prefetchInProgress) {
+        this.startPrefetch(text);
+      }
       return;
     }
     
@@ -313,21 +317,10 @@ class ZundamonVoiceController {
       // ArrayBufferに変換
       const audioData = new Uint8Array(result.audioData).buffer;
       
-      // 音声合成完了時点で次のチャンクの合成を先行開始（プリフェッチ）
+      // 再生開始と同時に次のチャンクをプリフェッチ
       if (this.processingQueue.length > 0 && !this.prefetchInProgress) {
-        this.prefetchInProgress = true;
         const nextText = this.processingQueue[0];
-        this.synthesizeViaBackground(nextText).then(nextResult => {
-          if (nextResult.success) {
-            this.prefetchedAudio = {
-              text: nextText,
-              audioData: new Uint8Array(nextResult.audioData).buffer
-            };
-          }
-          this.prefetchInProgress = false;
-        }).catch(() => {
-          this.prefetchInProgress = false;
-        });
+        this.startPrefetch(nextText);
       }
       
       // 再生
@@ -338,8 +331,8 @@ class ZundamonVoiceController {
     } finally {
       this.isPlaying = false;
       
-      // キューに残っているテキストがあれば次を再生
-      if (this.processingQueue.length > 0) {
+      // キューに残っているテキストがあれば次を再生（ループ構造）
+      while (this.processingQueue.length > 0) {
         const nextText = this.processingQueue.shift();
         
         // プリフェッチ済みの場合は即座に再生
@@ -350,38 +343,41 @@ class ZundamonVoiceController {
           
           // 次のチャンクをプリフェッチ
           if (this.processingQueue.length > 0 && !this.prefetchInProgress) {
-            this.prefetchInProgress = true;
             const followingText = this.processingQueue[0];
-            this.synthesizeViaBackground(followingText).then(result => {
-              if (result.success) {
-                this.prefetchedAudio = {
-                  text: followingText,
-                  audioData: new Uint8Array(result.audioData).buffer
-                };
-              }
-              this.prefetchInProgress = false;
-            }).catch(() => {
-              this.prefetchInProgress = false;
-            });
+            this.startPrefetch(followingText);
           }
           
-          this.playAudio(cachedAudio)
-            .then(() => {
-              this.isPlaying = false;
-              if (this.processingQueue.length > 0) {
-                this.speakText(this.processingQueue.shift());
-              }
-            })
-            .catch(err => {
-              console.error('❌ 音声再生エラー:', err);
-              this.isPlaying = false;
-            });
+          try {
+            await this.playAudio(cachedAudio);
+            this.isPlaying = false;
+          } catch (err) {
+            console.error('❌ 音声再生エラー:', err);
+            this.isPlaying = false;
+            break;
+          }
         } else {
+          // キャッシュミス - 再帰呼び出しで処理
           this.prefetchedAudio = null;
           this.speakText(nextText);
+          break;
         }
       }
     }
+  }
+  
+  startPrefetch(text) {
+    this.prefetchInProgress = true;
+    this.synthesizeViaBackground(text).then(result => {
+      if (result.success) {
+        this.prefetchedAudio = {
+          text: text,
+          audioData: new Uint8Array(result.audioData).buffer
+        };
+      }
+      this.prefetchInProgress = false;
+    }).catch(() => {
+      this.prefetchInProgress = false;
+    });
   }
   
   async synthesizeViaBackground(text, retryCount = 0) {
