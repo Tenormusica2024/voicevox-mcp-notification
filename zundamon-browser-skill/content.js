@@ -384,17 +384,57 @@ class ZundamonVoiceController {
     }
   }
   
-  async synthesizeViaBackground(text) {
+  async synthesizeViaBackground(text, retryCount = 0) {
+    const MAX_RETRIES = 1;
+    const TIMEOUT_MS = 25000; // 25秒でタイムアウト（Chrome拡張の30秒制限より短く設定）
+    
     return new Promise((resolve) => {
+      let timeoutId;
+      let messageCompleted = false;
+      
+      // タイムアウトハンドリング
+      timeoutId = setTimeout(() => {
+        if (!messageCompleted) {
+          messageCompleted = true;
+          console.error('❌ メッセージポートタイムアウト（25秒）');
+          
+          // リトライ可能な場合は再試行
+          if (retryCount < MAX_RETRIES) {
+            console.log(`🔄 音声合成を再試行します (${retryCount + 1}/${MAX_RETRIES})`);
+            this.synthesizeViaBackground(text, retryCount + 1)
+              .then(resolve)
+              .catch(() => resolve({ success: false, error: 'Timeout after retry' }));
+          } else {
+            resolve({ success: false, error: 'Message port timeout' });
+          }
+        }
+      }, TIMEOUT_MS);
+      
       chrome.runtime.sendMessage({
         action: 'synthesize',
         text: text,
         speakerID: this.speakerID
       }, (response) => {
-        if (chrome.runtime.lastError) {
-          resolve({ success: false, error: chrome.runtime.lastError.message });
-        } else {
-          resolve(response || { success: false, error: 'No response' });
+        if (!messageCompleted) {
+          messageCompleted = true;
+          clearTimeout(timeoutId);
+          
+          if (chrome.runtime.lastError) {
+            const errorMsg = chrome.runtime.lastError.message;
+            console.error('❌ Chrome拡張エラー:', errorMsg);
+            
+            // "message port closed" エラーの場合はリトライ
+            if (errorMsg.includes('message port closed') && retryCount < MAX_RETRIES) {
+              console.log(`🔄 音声合成を再試行します (${retryCount + 1}/${MAX_RETRIES})`);
+              this.synthesizeViaBackground(text, retryCount + 1)
+                .then(resolve)
+                .catch(() => resolve({ success: false, error: errorMsg }));
+            } else {
+              resolve({ success: false, error: errorMsg });
+            }
+          } else {
+            resolve(response || { success: false, error: 'No response' });
+          }
         }
       });
     });
