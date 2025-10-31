@@ -155,10 +155,74 @@ class ZundamonVoiceController {
     if (textToSpeak.length > 0) {
       this.lastProcessedText = text;
       console.log('🗣️ 読み上げ開始:', textToSpeak.substring(0, 50));
-      this.speakText(textToSpeak);
+      
+      // 長文の場合は分割して段階的に読み上げ
+      const chunks = this.splitTextForReading(textToSpeak);
+      console.log(`📦 テキストを${chunks.length}個に分割して読み上げます`);
+      
+      chunks.forEach((chunk, index) => {
+        console.log(`  チャンク${index + 1}/${chunks.length}: ${chunk.length}文字`);
+        this.speakText(chunk);
+      });
     } else {
       console.log('❌ 要約後のテキストが空');
     }
+  }
+  
+  splitTextForReading(text) {
+    // 100文字以下なら分割不要
+    if (text.length <= 100) {
+      return [text];
+    }
+    
+    const chunks = [];
+    
+    // まず改行で分割
+    const lines = text.split('\n').filter(line => line.trim().length > 0);
+    
+    let currentChunk = '';
+    
+    for (const line of lines) {
+      // 現在のチャンクに行を追加すると100文字を超える場合
+      if (currentChunk.length > 0 && (currentChunk + '\n' + line).length > 100) {
+        // 現在のチャンクを確定
+        chunks.push(currentChunk.trim());
+        currentChunk = line;
+      } else {
+        // 現在のチャンクに追加
+        if (currentChunk.length > 0) {
+          currentChunk += '\n' + line;
+        } else {
+          currentChunk = line;
+        }
+      }
+      
+      // 1行が100文字を超える場合は句点で分割
+      if (currentChunk.length > 100) {
+        const sentences = currentChunk.split(/([。！？])/);
+        let sentenceChunk = '';
+        
+        for (let i = 0; i < sentences.length; i += 2) {
+          const sentence = sentences[i] + (sentences[i + 1] || '');
+          
+          if ((sentenceChunk + sentence).length > 100 && sentenceChunk.length > 0) {
+            chunks.push(sentenceChunk.trim());
+            sentenceChunk = sentence;
+          } else {
+            sentenceChunk += sentence;
+          }
+        }
+        
+        currentChunk = sentenceChunk;
+      }
+    }
+    
+    // 残りのチャンクを追加
+    if (currentChunk.trim().length > 0) {
+      chunks.push(currentChunk.trim());
+    }
+    
+    return chunks;
   }
   
   extractText(element) {
