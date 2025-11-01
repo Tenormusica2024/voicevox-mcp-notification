@@ -17,15 +17,29 @@ class ZundamonVoiceController {
     this.processingQueue = []; // 処理待ちキュー
     this.prefetchCache = new Map(); // プリフェッチキャッシュ（複数チャンク対応）
     this.prefetchInProgress = new Set(); // プリフェッチ実行中のテキスト
+    this.vtsEnabled = false; // VTubeStudio連携有効フラグ
     
     this.init();
   }
   
   async init() {
-    const settings = await chrome.storage.sync.get(['enabled']);
+    const settings = await chrome.storage.sync.get(['enabled', 'vtsEnabled']);
     this.isEnabled = settings.enabled !== false;
+    this.vtsEnabled = settings.vtsEnabled === true;
     
     this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    
+    // VTubeStudio接続試行
+    if (this.vtsEnabled && window.vtsConnector) {
+      console.log('🎭 VTubeStudio接続を試行中...');
+      window.vtsConnector.connect()
+        .then(() => {
+          console.log('✅ VTubeStudio連携が有効になりました');
+        })
+        .catch(err => {
+          console.warn('⚠️ VTubeStudio接続失敗（口パクなしで動作）:', err);
+        });
+    }
     
     // ページロード後5秒待機してから監視開始（既存メッセージを無視）
     console.log('🔊 Zundamon Voice for Claude: 起動完了（5秒後に監視開始）');
@@ -498,12 +512,69 @@ class ZundamonVoiceController {
     const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
     const source = this.audioContext.createBufferSource();
     source.buffer = audioBuffer;
-    source.connect(this.audioContext.destination);
+    
+    // VTubeStudio口パク連携用のAnalyserNode追加
+    let analyser = null;
+    if (this.vtsEnabled && window.vtsConnector && window.vtsConnector.isAuthenticated) {
+      analyser = this.audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      analyser.connect(this.audioContext.destination);
+    } else {
+      source.connect(this.audioContext.destination);
+    }
     
     return new Promise((resolve) => {
-      source.onended = resolve;
+      source.onended = () => {
+        // 再生終了時に口を閉じる
+        if (this.vtsEnabled && window.vtsConnector && window.vtsConnector.isAuthenticated) {
+          window.vtsConnector.setMouthOpen(0);
+        }
+        resolve();
+      };
+      
       source.start(0);
+      
+      // VTubeStudio口パクアニメーション開始
+      if (analyser) {
+        this.animateMouth(analyser, source);
+      }
     });
+  }
+  
+  animateMouth(analyser, source) {
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+    let animationFrameId = null;
+    
+    const updateMouth = () => {
+      // 音声再生が終了していたらアニメーション停止
+      if (source.playbackRate === 0 || !this.vtsEnabled) {
+        if (animationFrameId) {
+          cancelAnimationFrame(animationFrameId);
+        }
+        return;
+      }
+      
+      // 音量データ取得
+      analyser.getByteFrequencyData(dataArray);
+      
+      // 平均音量を計算（0-255範囲）
+      const sum = dataArray.reduce((a, b) => a + b, 0);
+      const average = sum / dataArray.length;
+      
+      // 音量を0-1の範囲に正規化（VTubeStudioパラメータ範囲）
+      const mouthValue = Math.min(1, average / 128);
+      
+      // VTubeStudioに口パクパラメータ送信
+      if (window.vtsConnector && window.vtsConnector.isAuthenticated) {
+        window.vtsConnector.setMouthOpen(mouthValue);
+      }
+      
+      // 次のフレーム
+      animationFrameId = requestAnimationFrame(updateMouth);
+    };
+    
+    updateMouth();
   }
   
   showNotification(title, message) {
