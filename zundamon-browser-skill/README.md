@@ -207,11 +207,51 @@ Claude応答検出 (MutationObserver)
   - エラー時のみログ出力
   - 本番環境でのパフォーマンス向上
 
-#### 🐛 バグ修正
-- ISOLATED worldからMAIN worldのオブジェクトアクセス問題解決
-- VRM接続状態管理のISOLATED world移行
-- playAudio()内のAnalyserNode生成条件修正
-- animateMouth()の停止条件修正
+#### 🐛 バグ修正と詳細なエラーハンドリング
+
+**Chrome Extension ISOLATED/MAIN World問題の解決**
+- **問題**: Content ScriptはデフォルトでISOLATED worldで動作し、ページの`window`オブジェクトにアクセスできない
+- **症状**: `window.vrmConnector.isConnected`が常にundefinedを返し、口パクアニメーションが動作しない
+- **解決策**:
+  - VRM接続状態を`this.vrmConnected`フラグとしてISOLATED worldで管理
+  - postMessage()でISOLATED↔MAIN間の通信を実装
+  - vrm-bridge.jsでメッセージリレー機能を実装
+- **修正箇所**:
+  - `content.js:531-532` - playAudio()のneedsAnalyser判定
+  - `content.js:549-551` - 再生終了時の口閉じ処理
+  - `content.js:572` - animateMouth()の停止条件
+
+**postMessage event.source検証問題**
+- **問題**: `event.source !== window`チェックがISOLATED worldからのメッセージをブロック
+- **原因**: ISOLATED worldとMAIN worldは異なる`window`オブジェクトを持つ
+- **解決策**: event.sourceチェックを削除し、type-basedフィルタリングのみ使用
+- **修正箇所**:
+  - `vrm-bridge.js:12` - event.sourceチェック削除
+  - `content.js:633` - responseHandler内のチェック削除
+
+**Background Service Worker sleep問題**
+- **問題**: Chrome MV3のService Workerは非アクティブ時にsleepし、メッセージに応答しない
+- **症状**: "The message port closed before a response was received." エラー
+- **解決策**:
+  - ping/pongメカニズムで事前にService Workerをウェイクアップ
+  - タイムアウト時間を25秒→10秒に短縮（早期リトライ）
+  - リトライ回数を1回→2回に拡大
+- **修正箇所**:
+  - `content.js:474-476` - ping送信追加
+  - `content.js:441` - タイムアウト短縮
+  - `content.js:440` - リトライ回数拡大
+  - `background.js:17-21` - pingレスポンス実装
+
+**Extension context invalidation処理**
+- **問題**: 拡張機能再読み込み時にcontent scriptが無効化され、エラーが大量発生
+- **解決策**: 
+  - `chrome.runtime.id`で無効化を検出
+  - `fatal`フラグで致命的エラーを区別
+  - 致命的エラー時は`this.isEnabled = false`で静かに終了
+- **修正箇所**:
+  - `content.js:444-448` - context無効化チェック
+  - `content.js:490-495` - Extension context invalidatedエラー処理
+  - `content.js:514-520` - catch内のfatalフラグ処理
 
 ### v1.0.0 (2025-01-01) - feature/optimization-improvements
 
@@ -297,6 +337,44 @@ Claude応答検出 (MutationObserver)
 - **音声同期精度**: ±10ms以内
 
 ## 🔍 トラブルシューティング
+
+### VRM連携が動作しない
+
+**原因1: Bridge Serverが起動していない**
+```bash
+解決策: npm start でBridge Serverを起動
+確認方法: コンソールで「Bridge Server listening on port 8765」を確認
+```
+
+**原因2: VSeeFaceのVMC Protocolが無効**
+```bash
+解決策:
+1. VSeeFace設定を開く
+2. 「VMCプロトコルで受信する (トラッキングを無効)」をON
+3. ポート番号39540を設定
+```
+
+**原因3: 口パクが動かない**
+```bash
+原因:
+- ISOLATED worldからMAIN worldの`window.vrmConnector`にアクセスできない
+- playAudio()内でneedsAnalyserがfalseと判定されるAnalyserが生成されない
+
+解決策:
+- vrm-bridge.jsでpostMessageブリッジを実装済み
+- this.vrmConnectedフラグでISOLATED world内で管理
+確認方法: コンソールで「VRM連携が有効になりました」を確認
+```
+
+**原因4: 口の動きが不自然**
+```bash
+原因: アニメ風口パクアルゴリズムが有効ではない
+
+解決策:
+- 8フレーム（133ms）ごとに「大きく開く(0.8)」と「小さく開く(0.2)」を交互切り替え
+- 無音時は完全に口を閉じる（閾値8）
+- 人の声帯域（80Hz-3.5kHz）を重視
+```
 
 ### 音声が再生されない
 
