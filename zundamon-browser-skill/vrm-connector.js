@@ -191,6 +191,33 @@ class VRMConnector {
       console.error('❌ VRM BlendShape送信エラー:', error);
     }
   }
+  
+  /**
+   * 腕のポーズを設定（音声再生時の制御）
+   * @param {boolean} isPlaying - true: 腕を下げる, false: T-Poseに戻す
+   */
+  async setArmPose(isPlaying) {
+    console.log(`🔍 setArmPose呼び出し: isConnected=${this.isConnected}, ws=${!!this.ws}`);
+    if (!this.isConnected || !this.ws) {
+      console.warn('⚠️ VRM未接続のため腕ポーズ設定をスキップ');
+      return false;
+    }
+    
+    try {
+      const message = {
+        type: 'setArmPose',
+        isPlaying: isPlaying
+      };
+      
+      this.ws.send(JSON.stringify(message));
+      console.log(`🎵 腕ポーズ設定: ${isPlaying ? '下げる' : 'T-Pose'}`);
+      return true;
+      
+    } catch (error) {
+      console.error('❌ VRM腕ポーズ送信エラー:', error);
+      return false;
+    }
+  }
 }
 
 // グローバルインスタンス作成
