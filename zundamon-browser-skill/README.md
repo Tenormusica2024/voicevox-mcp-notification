@@ -48,6 +48,7 @@ Claude AIの応答をずんだもん音声で自動読み上げし、VTubeStudio
   - ダウンロード: https://nodejs.org/
 - **ずんだもんVRMモデル**: VRoid Hub等から取得
   - VRoid Hub: https://hub.vroid.com/
+  - 公式ずんだもんVRM: https://3d.nicovideo.jp/works/td90573
 
 ## 🚀 インストール手順
 
@@ -142,9 +143,13 @@ zundamon-browser-skill/
 ├── manifest.json          # Chrome拡張機能マニフェスト
 ├── content.js            # メインロジック（音声読み上げ制御）
 ├── vts-connector.js      # VTubeStudio WebSocket連携
+├── vrm-connector.js      # VRM VMC Protocol連携
+├── vrm-bridge.js         # ISOLATED/MAIN Worldブリッジ
 ├── background.js         # Background Service Worker
 ├── popup.html            # 設定UIのHTML
 ├── popup.js              # 設定UIのロジック
+├── bridge-server.js      # WebSocket-OSC Bridge Server
+├── package.json          # Node.js依存関係
 ├── icon16.png            # アイコン（16x16）
 ├── icon48.png            # アイコン（48x48）
 ├── icon128.png           # アイコン（128x128）
@@ -152,11 +157,14 @@ zundamon-browser-skill/
 ```
 
 ### 技術スタック
-- **WebSocket**: VTubeStudio API通信
+- **WebSocket**: VTubeStudio API通信 / VRM Bridge Server通信
+- **OSC (Open Sound Control)**: VMC Protocol経由VRM制御
+- **postMessage API**: Chrome拡張機能のISOLATED/MAIN World通信
 - **Web Audio API**: 音声再生・音量解析
 - **Chrome Extension API**: Storage, Messaging
 - **MutationObserver**: DOM変更検出
 - **RequestAnimationFrame**: 口パクアニメーション
+- **Node.js**: Bridge Server (ws + osc packages)
 
 ### データフロー
 ```
@@ -172,6 +180,38 @@ Claude応答検出 (MutationObserver)
 ```
 
 ## 🔧 開発履歴
+
+### v1.1.0 (2025-01-02) - feature/vroid-support
+
+#### 🎨 VRM連携機能追加（VSeeFace対応）
+- **VMC Protocol経由でVRMモデルと連携**
+  - WebSocket Bridge Server（Node.js）経由でOSC通信
+  - VSeeFace、Warudo、VirtualMotionCapture等で使用可能
+  - ポート39540（VMC Protocol標準）
+- **ISOLATED/MAIN World通信ブリッジ実装**
+  - vrm-bridge.js: postMessageリレーモジュール
+  - Chrome拡張機能のISOLATED worldからMAIN worldのVRMConnectorを制御
+  - クロスワールドメッセージングパターンの実装
+- **アニメ風口パクアルゴリズム**
+  - 音声検出時に「大きく開く(0.8)」と「小さく開く(0.2)」を交互に切り替え
+  - 8フレーム（約133ms）ごとに開閉反転
+  - 人の声帯域（80Hz-3.5kHz）を重視した音量解析
+  - 無音時は完全に口を閉じる（閾値8）
+- **Background Service Worker最適化**
+  - ping/pongメカニズムでService Workerをウェイクアップ
+  - タイムアウト時間2回に短縮（25秒→10秒）
+  - リトライ回数拡大（1回→2回）
+  - エラーログの詳細化と整理
+- **デバッグログクリーンアップ**
+  - 過剰なconsole.logを削除
+  - エラー時のみログ出力
+  - 本番環境でのパフォーマンス向上
+
+#### 🐛 バグ修正
+- ISOLATED worldからMAIN worldのオブジェクトアクセス問題解決
+- VRM接続状態管理のISOLATED world移行
+- playAudio()内のAnalyserNode生成条件修正
+- animateMouth()の停止条件修正
 
 ### v1.0.0 (2025-01-01) - feature/optimization-improvements
 

@@ -19,6 +19,7 @@ class ZundamonVoiceController {
     this.prefetchInProgress = new Set(); // プリフェッチ実行中のテキスト
     this.vtsEnabled = false; // VTubeStudio連携有効フラグ
     this.vrmEnabled = false; // VRM連携有効フラグ
+    this.vrmConnected = false; // VRM接続状態（ISOLATED worldで管理）
     
     this.init();
   }
@@ -43,16 +44,9 @@ class ZundamonVoiceController {
         });
     }
     
-    // VRM接続試行
-    if (this.vrmEnabled && window.vrmConnector) {
-      console.log('🎨 VRM連携接続を試行中...');
-      window.vrmConnector.connect()
-        .then(() => {
-          console.log('✅ VRM連携が有効になりました');
-        })
-        .catch(err => {
-          console.warn('⚠️ VRM連携接続失敗（口パクなしで動作）:', err);
-        });
+    // VRM接続試行（postMessage経由）
+    if (this.vrmEnabled) {
+      this.vrmConnect();
     }
     
     // ページロード後5秒待機してから監視開始（既存メッセージを無視）
@@ -442,8 +436,8 @@ class ZundamonVoiceController {
   }
   
   async synthesizeViaBackground(text, retryCount = 0) {
-    const MAX_RETRIES = 1;
-    const TIMEOUT_MS = 25000; // 25秒でタイムアウト（Chrome拡張の30秒制限より短く設定）
+    const MAX_RETRIES = 2;
+    const TIMEOUT_MS = 10000; // 10秒でタイムアウト（短縮して早期リトライ）
     
     // Extension context無効化チェック
     if (!chrome.runtime?.id) {
@@ -463,24 +457,27 @@ class ZundamonVoiceController {
           
           // リトライ可能な場合は再試行（警告レベル）
           if (retryCount < MAX_RETRIES) {
-            console.warn(`⚠️ メッセージポートタイムアウト（25秒）、再試行します (${retryCount + 1}/${MAX_RETRIES})`);
+            console.warn(`⚠️ Background Service Worker応答なし、再試行 (${retryCount + 1}/${MAX_RETRIES})`);
             this.synthesizeViaBackground(text, retryCount + 1)
               .then(resolve)
               .catch(() => resolve({ success: false, error: 'Timeout after retry' }));
           } else {
             // リトライ後も失敗した場合のみエラー表示
-            console.error('❌ メッセージポートタイムアウト（リトライ後も失敗）');
-            resolve({ success: false, error: 'Message port timeout' });
+            console.error('❌ Background Service Worker応答なし（VOICEVOX Engine起動確認してください）');
+            resolve({ success: false, error: 'Background Service Worker timeout' });
           }
         }
       }, TIMEOUT_MS);
       
       try {
-        chrome.runtime.sendMessage({
-          action: 'synthesize',
-          text: text,
-          speakerID: this.speakerID
-        }, (response) => {
+        // Service Workerをウェイクアップするため、まずpingメッセージを送信
+        chrome.runtime.sendMessage({ action: 'ping' }, () => {
+          // pingレスポンスを無視して本命のメッセージを送信
+          chrome.runtime.sendMessage({
+            action: 'synthesize',
+            text: text,
+            speakerID: this.speakerID
+          }, (response) => {
           if (!messageCompleted) {
             messageCompleted = true;
             clearTimeout(timeoutId);
@@ -511,6 +508,7 @@ class ZundamonVoiceController {
               resolve(response || { success: false, error: 'No response' });
             }
           }
+          });
         });
       } catch (error) {
         messageCompleted = true;
@@ -530,7 +528,7 @@ class ZundamonVoiceController {
     // VTubeStudio/VRM口パク連携用のAnalyserNode追加
     let analyser = null;
     const needsAnalyser = (this.vtsEnabled && window.vtsConnector && window.vtsConnector.isAuthenticated) ||
-                          (this.vrmEnabled && window.vrmConnector && window.vrmConnector.isConnected);
+                          (this.vrmEnabled && this.vrmConnected);
     
     if (needsAnalyser) {
       analyser = this.audioContext.createAnalyser();
@@ -547,8 +545,8 @@ class ZundamonVoiceController {
         if (this.vtsEnabled && window.vtsConnector && window.vtsConnector.isAuthenticated) {
           window.vtsConnector.setMouthOpen(0);
         }
-        if (this.vrmEnabled && window.vrmConnector && window.vrmConnector.isConnected) {
-          window.vrmConnector.setMouthOpen(0);
+        if (this.vrmEnabled && this.vrmConnected) {
+          this.vrmSetMouthOpen(0);
         }
         resolve();
       };
@@ -565,10 +563,13 @@ class ZundamonVoiceController {
   animateMouth(analyser, source) {
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
     let animationFrameId = null;
+    let isOpen = false; // 口の開閉状態
+    let frameCount = 0; // フレームカウンタ
+    const toggleInterval = 8; // 8フレーム（約133ms）ごとに開閉切り替え
     
     const updateMouth = () => {
       // 音声再生が終了していたらアニメーション停止
-      if (source.playbackRate === 0 || !this.vtsEnabled) {
+      if (source.playbackRate === 0 || (!this.vtsEnabled && !this.vrmEnabled)) {
         if (animationFrameId) {
           cancelAnimationFrame(animationFrameId);
         }
@@ -578,21 +579,39 @@ class ZundamonVoiceController {
       // 音量データ取得
       analyser.getByteFrequencyData(dataArray);
       
-      // 平均音量を計算（0-255範囲）
-      const sum = dataArray.reduce((a, b) => a + b, 0);
-      const average = sum / dataArray.length;
+      // 低〜中周波数帯域（人の声）を重視して音量計算
+      const voiceRange = dataArray.slice(2, 20);
+      const sum = voiceRange.reduce((a, b) => a + b, 0);
+      const average = sum / voiceRange.length;
       
-      // 音量を0-1の範囲に正規化
-      const mouthValue = Math.min(1, average / 128);
+      // 音声があるか判定（閾値8以上）
+      let mouthValue = 0;
+      if (average > 8) {
+        // アニメ風の二値的な口パク：開く/閉じるを繰り返す
+        frameCount++;
+        
+        if (frameCount >= toggleInterval) {
+          isOpen = !isOpen; // 開閉を反転
+          frameCount = 0;
+        }
+        
+        // 開いている時は0.8、閉じている時は0.2
+        mouthValue = isOpen ? 0.8 : 0.2;
+      } else {
+        // 無音時は口を閉じる
+        mouthValue = 0;
+        isOpen = false;
+        frameCount = 0;
+      }
       
       // VTubeStudioに口パクパラメータ送信
       if (this.vtsEnabled && window.vtsConnector && window.vtsConnector.isAuthenticated) {
         window.vtsConnector.setMouthOpen(mouthValue);
       }
       
-      // VRMに口パクパラメータ送信
-      if (this.vrmEnabled && window.vrmConnector && window.vrmConnector.isConnected) {
-        window.vrmConnector.setMouthOpen(mouthValue);
+      // VRMに口パクパラメータ送信（postMessage経由）
+      if (this.vrmEnabled && this.vrmConnected) {
+        this.vrmSetMouthOpen(mouthValue);
       }
       
       // 次のフレーム
@@ -610,6 +629,43 @@ class ZundamonVoiceController {
     this.isEnabled = enabled;
     await chrome.storage.sync.set({ enabled });
     console.log(`🔊 音声通知: ${enabled ? '有効' : '無効'}`);
+  }
+  
+  // VRM Bridge経由でconnect実行
+  vrmConnect() {
+    window.postMessage({
+      type: 'VRM_BRIDGE',
+      method: 'connect'
+    }, '*');
+    
+    // レスポンス待ち受け（1回のみ）
+    const responseHandler = (event) => {
+      // ISOLATED worldではevent.sourceチェックをスキップ
+      if (!event.data || typeof event.data !== 'object') return;
+      const { type, method, success } = event.data;
+      
+      if (type === 'VRM_BRIDGE_RESPONSE' && method === 'connect') {
+        if (success) {
+          this.vrmConnected = true;
+        } else {
+          this.vrmConnected = false;
+        }
+        window.removeEventListener('message', responseHandler);
+      }
+    };
+    
+    window.addEventListener('message', responseHandler);
+  }
+  
+  // VRM Bridge経由でsetMouthOpen実行（高頻度呼び出し用、レスポンス不要）
+  vrmSetMouthOpen(value) {
+    if (!this.vrmConnected) return;
+    
+    window.postMessage({
+      type: 'VRM_BRIDGE',
+      method: 'setMouthOpen',
+      params: { value }
+    }, '*');
   }
 }
 

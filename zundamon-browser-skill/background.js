@@ -14,6 +14,12 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  // Ping応答（Service Workerのウェイクアップ用）
+  if (request.action === 'ping') {
+    sendResponse({ success: true, pong: true });
+    return true;
+  }
+  
   if (request.action === 'getSettings') {
     chrome.storage.sync.get(['enabled', 'voicevoxAPI', 'speakerID'], (settings) => {
       sendResponse(settings);
@@ -28,7 +34,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ success: true, audioData: audioData });
       })
       .catch(error => {
-        console.error('❌ 音声合成失敗:', error.message);
         sendResponse({ success: false, error: error.message });
       });
     return true; // 非同期レスポンス
@@ -68,7 +73,6 @@ async function synthesizeAudio(text, speakerID) {
     return result;
     
   } catch (error) {
-    console.error('❌ [Background] 音声合成エラー:', error.message);
     throw error;
   }
 }
