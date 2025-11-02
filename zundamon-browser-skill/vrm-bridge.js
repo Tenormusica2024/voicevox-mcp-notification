@@ -35,6 +35,13 @@
           }
           break;
           
+        case 'setArmPose':
+          if (window.vrmConnector && window.vrmConnector.isConnected) {
+            await window.vrmConnector.setArmPose(params.isPlaying);
+            // レスポンス不要
+          }
+          break;
+          
         case 'isConnected':
           window.postMessage({
             type: 'VRM_BRIDGE_RESPONSE',

@@ -47,6 +47,11 @@ class ZundamonVoiceController {
     // VRM接続試行（postMessage経由）
     if (this.vrmEnabled) {
       this.vrmConnect();
+      // 接続後、常に腕を下げた状態に設定
+      setTimeout(() => {
+        this.vrmSetArmPose(true);
+        console.log('🎵 VRM初期化: 腕を下げた状態に設定');
+      }, 2000); // 接続完了を待つ
     }
     
     // ページロード後5秒待機してから監視開始（既存メッセージを無視）
@@ -161,15 +166,24 @@ class ZundamonVoiceController {
     this.processedElements.add(element);
     
     const text = this.extractText(element);
-    if (!text || text === this.lastProcessedText) return;
+    console.log('🔍 抽出テキスト:', text ? text.substring(0, 100) : '(空)');
+    if (!text || text === this.lastProcessedText) {
+      console.log('⚠️ テキスト処理スキップ:', !text ? 'テキストなし' : '既に処理済み');
+      return;
+    }
     
     const textToSpeak = this.summarizeIfNeeded(text);
-    if (textToSpeak.length === 0) return;
+    console.log('📝 要約後テキスト:', textToSpeak ? textToSpeak.substring(0, 100) : '(空)');
+    if (textToSpeak.length === 0) {
+      console.log('⚠️ 要約後テキストが空のためスキップ');
+      return;
+    }
     
     this.lastProcessedText = text;
     
     // 長文の場合は分割して段階的に読み上げ
     const chunks = this.splitTextForReading(textToSpeak);
+    console.log('📦 チャンク数:', chunks.length, '最初のチャンク:', chunks[0] ? chunks[0].substring(0, 50) : '(なし)');
     
     // すべてのチャンクを並列でプリフェッチ開始（最初のチャンクも含む）
     const prefetchCount = Math.min(5, chunks.length); // 最大5チャンクまで並列プリフェッチ
@@ -539,6 +553,8 @@ class ZundamonVoiceController {
       source.connect(this.audioContext.destination);
     }
     
+    // 音声再生中も腕は下げたまま維持（何もしない）
+    
     return new Promise((resolve) => {
       source.onended = () => {
         // 再生終了時に口を閉じる
@@ -547,6 +563,7 @@ class ZundamonVoiceController {
         }
         if (this.vrmEnabled && this.vrmConnected) {
           this.vrmSetMouthOpen(0);
+          // 腕は下げたまま維持（T-Poseに戻さない）
         }
         resolve();
       };
@@ -647,8 +664,10 @@ class ZundamonVoiceController {
       if (type === 'VRM_BRIDGE_RESPONSE' && method === 'connect') {
         if (success) {
           this.vrmConnected = true;
+          console.log('✅ VRM接続成功: this.vrmConnected =', this.vrmConnected);
         } else {
           this.vrmConnected = false;
+          console.warn('❌ VRM接続失敗: this.vrmConnected =', this.vrmConnected);
         }
         window.removeEventListener('message', responseHandler);
       }
@@ -659,12 +678,26 @@ class ZundamonVoiceController {
   
   // VRM Bridge経由でsetMouthOpen実行（高頻度呼び出し用、レスポンス不要）
   vrmSetMouthOpen(value) {
-    if (!this.vrmConnected) return;
+    if (!this.vrmConnected) {
+      return;
+    }
     
+    // F12ログ抑制（大量ログ防止）
     window.postMessage({
       type: 'VRM_BRIDGE',
       method: 'setMouthOpen',
       params: { value }
+    }, '*');
+  }
+  
+  // VRM Bridge経由でsetArmPose実行（音声再生制御用）
+  vrmSetArmPose(isPlaying) {
+    if (!this.vrmConnected) return;
+    
+    window.postMessage({
+      type: 'VRM_BRIDGE',
+      method: 'setArmPose',
+      params: { isPlaying }
     }, '*');
   }
 }
