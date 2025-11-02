@@ -18,14 +18,16 @@ class ZundamonVoiceController {
     this.prefetchCache = new Map(); // プリフェッチキャッシュ（複数チャンク対応）
     this.prefetchInProgress = new Set(); // プリフェッチ実行中のテキスト
     this.vtsEnabled = false; // VTubeStudio連携有効フラグ
+    this.vrmEnabled = false; // VRM連携有効フラグ
     
     this.init();
   }
   
   async init() {
-    const settings = await chrome.storage.sync.get(['enabled', 'vtsEnabled']);
+    const settings = await chrome.storage.sync.get(['enabled', 'vtsEnabled', 'vrmEnabled']);
     this.isEnabled = settings.enabled !== false;
     this.vtsEnabled = settings.vtsEnabled === true;
+    this.vrmEnabled = settings.vrmEnabled === true;
     
     this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
     
@@ -38,6 +40,18 @@ class ZundamonVoiceController {
         })
         .catch(err => {
           console.warn('⚠️ VTubeStudio接続失敗（口パクなしで動作）:', err);
+        });
+    }
+    
+    // VRM接続試行
+    if (this.vrmEnabled && window.vrmConnector) {
+      console.log('🎨 VRM連携接続を試行中...');
+      window.vrmConnector.connect()
+        .then(() => {
+          console.log('✅ VRM連携が有効になりました');
+        })
+        .catch(err => {
+          console.warn('⚠️ VRM連携接続失敗（口パクなしで動作）:', err);
         });
     }
     
@@ -513,9 +527,12 @@ class ZundamonVoiceController {
     const source = this.audioContext.createBufferSource();
     source.buffer = audioBuffer;
     
-    // VTubeStudio口パク連携用のAnalyserNode追加
+    // VTubeStudio/VRM口パク連携用のAnalyserNode追加
     let analyser = null;
-    if (this.vtsEnabled && window.vtsConnector && window.vtsConnector.isAuthenticated) {
+    const needsAnalyser = (this.vtsEnabled && window.vtsConnector && window.vtsConnector.isAuthenticated) ||
+                          (this.vrmEnabled && window.vrmConnector && window.vrmConnector.isConnected);
+    
+    if (needsAnalyser) {
       analyser = this.audioContext.createAnalyser();
       analyser.fftSize = 256;
       source.connect(analyser);
@@ -529,6 +546,9 @@ class ZundamonVoiceController {
         // 再生終了時に口を閉じる
         if (this.vtsEnabled && window.vtsConnector && window.vtsConnector.isAuthenticated) {
           window.vtsConnector.setMouthOpen(0);
+        }
+        if (this.vrmEnabled && window.vrmConnector && window.vrmConnector.isConnected) {
+          window.vrmConnector.setMouthOpen(0);
         }
         resolve();
       };
@@ -562,12 +582,17 @@ class ZundamonVoiceController {
       const sum = dataArray.reduce((a, b) => a + b, 0);
       const average = sum / dataArray.length;
       
-      // 音量を0-1の範囲に正規化（VTubeStudioパラメータ範囲）
+      // 音量を0-1の範囲に正規化
       const mouthValue = Math.min(1, average / 128);
       
       // VTubeStudioに口パクパラメータ送信
-      if (window.vtsConnector && window.vtsConnector.isAuthenticated) {
+      if (this.vtsEnabled && window.vtsConnector && window.vtsConnector.isAuthenticated) {
         window.vtsConnector.setMouthOpen(mouthValue);
+      }
+      
+      // VRMに口パクパラメータ送信
+      if (this.vrmEnabled && window.vrmConnector && window.vrmConnector.isConnected) {
+        window.vrmConnector.setMouthOpen(mouthValue);
       }
       
       // 次のフレーム

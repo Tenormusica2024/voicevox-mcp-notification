@@ -5,14 +5,16 @@
 const statusDiv = document.getElementById('status');
 const enableToggle = document.getElementById('enableToggle');
 const vtsToggle = document.getElementById('vtsToggle');
+const vrmToggle = document.getElementById('vrmToggle');
 const testButton = document.getElementById('testButton');
 
 // 初期化
 async function init() {
   // 設定読み込み
-  const settings = await chrome.storage.sync.get(['enabled', 'vtsEnabled']);
+  const settings = await chrome.storage.sync.get(['enabled', 'vtsEnabled', 'vrmEnabled']);
   enableToggle.checked = settings.enabled !== false;
   vtsToggle.checked = settings.vtsEnabled === true;
+  vrmToggle.checked = settings.vrmEnabled === true;
   
   // VOICEVOX接続確認
   checkVoicevoxConnection();
@@ -58,7 +60,27 @@ vtsToggle.addEventListener('change', async () => {
   const vtsEnabled = vtsToggle.checked;
   await chrome.storage.sync.set({ vtsEnabled });
   
+  // VRM連携と排他制御
+  if (vtsEnabled && vrmToggle.checked) {
+    vrmToggle.checked = false;
+    await chrome.storage.sync.set({ vrmEnabled: false });
+  }
+  
   showStatus('info', vtsEnabled ? '🎭 VTubeStudio連携: 有効（ページ再読み込み必要）' : '🎭 VTubeStudio連携: 無効');
+});
+
+// VRMトグル変更
+vrmToggle.addEventListener('change', async () => {
+  const vrmEnabled = vrmToggle.checked;
+  await chrome.storage.sync.set({ vrmEnabled });
+  
+  // VTubeStudio連携と排他制御
+  if (vrmEnabled && vtsToggle.checked) {
+    vtsToggle.checked = false;
+    await chrome.storage.sync.set({ vtsEnabled: false });
+  }
+  
+  showStatus('info', vrmEnabled ? '🎨 VRM連携: 有効（ページ再読み込み＋Bridge Server起動必要）' : '🎨 VRM連携: 無効');
 });
 
 // テストボタン
