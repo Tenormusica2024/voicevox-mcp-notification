@@ -35,24 +35,27 @@ npm test
 
 ## 📋 次に必要な手順（ユーザー操作が必要）
 
-### 1. VSeeFaceのセットアップ（初回のみ）
+### 1. VMagicMirrorのセットアップ（初回のみ）
 
 #### ダウンロード・インストール
-1. https://www.vseeface.icu/ にアクセス
-2. 「Download」をクリック
+1. https://malaybaku.github.io/VMagicMirror/en/ にアクセス
+2. 「Download」→「Latest Release」をクリック
 3. ZIPファイルを解凍
-4. `VSeeFace.exe` を実行
+4. `VMagicMirror.exe` を実行
 
 #### VRMモデルロード
-1. VSeeFace起動後、「Model」→「Load VRM Model」
-2. ずんだもんVRMモデル（.vrm）を選択
-3. モデルが画面に表示されることを確認
+1. VMagicMirror起動後、「ホーム」タブ
+2. 「VRM読み込み」→VRMファイル選択
+3. ずんだもんVRMモデル（.vrm）を選択
+4. モデルが画面に表示されることを確認
 
 #### VMC Protocol有効化
-1. VSeeFace「Settings（⚙️）」→「OSC/VMC」タブ
-2. 「Enable OSC/VMC receiving」を**ON**
-3. Port: **39540**（重要）
-4. 「Apply」をクリック
+1. 「配信」タブを開く
+2. 「外部トラッキング」セクション
+3. 「VMC Protocolで動きを受信」を**ON**
+4. Port: **39540**（デフォルト）
+
+**注意**: VSeeFaceはVMC Protocolのボーン制御に対応していないため、VMagicMirrorの使用を推奨します。
 
 ### 2. Chrome拡張機能の設定
 
@@ -89,8 +92,13 @@ Chrome拡張（vrm-connector.js）
     ↓ WebSocket（localhost:8765）
 Bridge Server（vrm-bridge-server.js）
     ↓ OSC over UDP（localhost:39540）
-VSeeFace（VRMモデル）
+VMagicMirror（VRMモデル）
 ```
+
+### 対応VRMアプリケーション
+- ✅ **VMagicMirror** - フル対応（BlendShape + ボーン制御）
+- ❌ **VSeeFace** - 非対応（BlendShapeのみ対応、ボーン制御不可）
+- ⚠️ **3tene FREE** - 非対応（VMC Protocol受信機能なし）
 
 ### 口パクアルゴリズム
 - **小音量（< 0.3）**: 母音 I 優勢（狭い口）
@@ -115,7 +123,7 @@ VSeeFace（VRMモデル）
 ```bash
 npm test
 ```
-VSeeFaceが起動している場合、VRMモデルの口が段階的に動くのを確認できます。
+VMagicMirrorが起動している場合、VRMモデルの口が段階的に動くのを確認できます。
 
 ### Bridge Server再起動
 ```bash
@@ -156,10 +164,11 @@ netstat -ano | findstr :8765
 taskkill /PID <プロセスID> /F
 ```
 
-### VSeeFaceに口パクが反映されない
-1. VSeeFaceのVMC Protocol設定を確認（Port: 39540, Receiving: ON）
+### VMagicMirrorに口パクが反映されない
+1. VMagicMirrorのVMC Protocol設定を確認（Port: 39540, Receiving: ON）
 2. Bridge Serverのログでメッセージ送信を確認
 3. Windowsファイアウォール設定を確認
+4. VMagicMirrorの「配信」タブで接続状態を確認（接続時にアイコンが緑点灯）
 
 ### Chrome拡張でVRM連携が接続できない
 1. Bridge Serverが起動しているか確認
@@ -174,16 +183,18 @@ taskkill /PID <プロセスID> /F
 - Windows 10/11
 - Chrome 最新版
 - Node.js v16以降
-- VSeeFace 最新版
+- VMagicMirror v1.x以降（推奨）
+- VSeeFace（BlendShapeのみ、ボーン制御不可）
 
 ### 報告時に必要な情報
 1. Bridge Serverのコンソール出力
 2. ブラウザのコンソールログ（F12）
-3. VSeeFaceの設定スクリーンショット
+3. VMagicMirrorの設定スクリーンショット
 4. エラーメッセージの詳細
+5. 使用中のVRMアプリケーション名とバージョン
 
 ---
 
-**現在のステータス**: Bridge Server起動中・テスト済み・正常動作✅
+**現在のステータス**: Bridge Server起動中・テスト済み・VMagicMirrorで正常動作確認済み✅
 
-次の手順: [VRM_SETUP_GUIDE.md](./VRM_SETUP_GUIDE.md) を参照してVSeeFaceをセットアップしてください。
+次の手順: [VRM_SETUP_GUIDE.md](./VRM_SETUP_GUIDE.md) を参照してVMagicMirrorをセットアップしてください。
