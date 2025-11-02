@@ -4,13 +4,15 @@
 
 const statusDiv = document.getElementById('status');
 const enableToggle = document.getElementById('enableToggle');
+const vtsToggle = document.getElementById('vtsToggle');
 const testButton = document.getElementById('testButton');
 
 // 初期化
 async function init() {
   // 設定読み込み
-  const settings = await chrome.storage.sync.get(['enabled']);
+  const settings = await chrome.storage.sync.get(['enabled', 'vtsEnabled']);
   enableToggle.checked = settings.enabled !== false;
+  vtsToggle.checked = settings.vtsEnabled === true;
   
   // VOICEVOX接続確認
   checkVoicevoxConnection();
@@ -49,6 +51,14 @@ enableToggle.addEventListener('change', async () => {
   });
   
   showStatus('info', enabled ? '🔊 音声通知: 有効' : '🔇 音声通知: 無効');
+});
+
+// VTubeStudioトグル変更
+vtsToggle.addEventListener('change', async () => {
+  const vtsEnabled = vtsToggle.checked;
+  await chrome.storage.sync.set({ vtsEnabled });
+  
+  showStatus('info', vtsEnabled ? '🎭 VTubeStudio連携: 有効（ページ再読み込み必要）' : '🎭 VTubeStudio連携: 無効');
 });
 
 // テストボタン

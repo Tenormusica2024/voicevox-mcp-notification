@@ -17,15 +17,29 @@ class ZundamonVoiceController {
     this.processingQueue = []; // 処理待ちキュー
     this.prefetchCache = new Map(); // プリフェッチキャッシュ（複数チャンク対応）
     this.prefetchInProgress = new Set(); // プリフェッチ実行中のテキスト
+    this.vtsEnabled = false; // VTubeStudio連携有効フラグ
     
     this.init();
   }
   
   async init() {
-    const settings = await chrome.storage.sync.get(['enabled']);
+    const settings = await chrome.storage.sync.get(['enabled', 'vtsEnabled']);
     this.isEnabled = settings.enabled !== false;
+    this.vtsEnabled = settings.vtsEnabled === true;
     
     this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    
+    // VTubeStudio接続試行
+    if (this.vtsEnabled && window.vtsConnector) {
+      console.log('🎭 VTubeStudio接続を試行中...');
+      window.vtsConnector.connect()
+        .then(() => {
+          console.log('✅ VTubeStudio連携が有効になりました');
+        })
+        .catch(err => {
+          console.warn('⚠️ VTubeStudio接続失敗（口パクなしで動作）:', err);
+        });
+    }
     
     // ページロード後5秒待機してから監視開始（既存メッセージを無視）
     console.log('🔊 Zundamon Voice for Claude: 起動完了（5秒後に監視開始）');
@@ -115,10 +129,8 @@ class ZundamonVoiceController {
       if (!isStreaming) {
         console.log('✅ ストリーミング完了を検出');
         observer.disconnect();
-        // 少し待ってから処理（DOMが完全に更新されるのを待つ）
-        setTimeout(() => {
-          this.processClaudeMessage(element);
-        }, 500);
+        // 即座に処理開始（遅延削除）
+        this.processClaudeMessage(element);
       }
     });
     
@@ -151,12 +163,13 @@ class ZundamonVoiceController {
     // 長文の場合は分割して段階的に読み上げ
     const chunks = this.splitTextForReading(textToSpeak);
     
-    // 最初の3チャンクを並列でプリフェッチ（序盤の待機時間削減）
-    const prefetchCount = Math.min(3, chunks.length);
-    for (let i = 1; i < prefetchCount; i++) {
+    // すべてのチャンクを並列でプリフェッチ開始（最初のチャンクも含む）
+    const prefetchCount = Math.min(5, chunks.length); // 最大5チャンクまで並列プリフェッチ
+    for (let i = 0; i < prefetchCount; i++) {
       this.startPrefetch(chunks[i]);
     }
     
+    // プリフェッチ開始後、順次再生開始
     chunks.forEach(chunk => this.speakText(chunk));
   }
   
@@ -314,28 +327,50 @@ class ZundamonVoiceController {
     this.isPlaying = true;
     
     try {
-      // Background Service Worker経由でAPI呼び出し
-      const result = await this.synthesizeViaBackground(text);
+      // プリフェッチ完了を待機（最大3秒）
+      const maxWait = 3000;
+      const startTime = Date.now();
+      while (!this.prefetchCache.has(text) && 
+             this.prefetchInProgress.has(text) && 
+             Date.now() - startTime < maxWait) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
       
-      if (!result.success) {
-        // Extension context無効化などの致命的エラーは静かに終了
-        if (result.fatal) {
-          return;
+      // プリフェッチ成功時はキャッシュを使用
+      if (this.prefetchCache.has(text)) {
+        const audioData = this.prefetchCache.get(text);
+        this.prefetchCache.delete(text);
+        
+        // 次のチャンクをプリフェッチ
+        if (this.processingQueue.length > 0 && !this.prefetchInProgress.has(this.processingQueue[0])) {
+          this.startPrefetch(this.processingQueue[0]);
         }
-        throw new Error(result.error);
+        
+        await this.playAudio(audioData);
+      } else {
+        // プリフェッチ失敗時は通常の合成
+        const result = await this.synthesizeViaBackground(text);
+        
+        if (!result.success) {
+          // Extension context無効化などの致命的エラーは静かに終了
+          if (result.fatal) {
+            return;
+          }
+          throw new Error(result.error);
+        }
+        
+        // ArrayBufferに変換
+        const audioData = new Uint8Array(result.audioData).buffer;
+        
+        // 再生開始と同時に次のチャンクをプリフェッチ
+        if (this.processingQueue.length > 0 && !this.prefetchInProgress.has(this.processingQueue[0])) {
+          const nextText = this.processingQueue[0];
+          this.startPrefetch(nextText);
+        }
+        
+        // 再生
+        await this.playAudio(audioData);
       }
-      
-      // ArrayBufferに変換
-      const audioData = new Uint8Array(result.audioData).buffer;
-      
-      // 再生開始と同時に次のチャンクをプリフェッチ
-      if (this.processingQueue.length > 0 && !this.prefetchInProgress.has(this.processingQueue[0])) {
-        const nextText = this.processingQueue[0];
-        this.startPrefetch(nextText);
-      }
-      
-      // 再生
-      await this.playAudio(audioData);
       
     } catch (error) {
       console.error('❌ 音声合成エラー:', error);
@@ -477,12 +512,69 @@ class ZundamonVoiceController {
     const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
     const source = this.audioContext.createBufferSource();
     source.buffer = audioBuffer;
-    source.connect(this.audioContext.destination);
+    
+    // VTubeStudio口パク連携用のAnalyserNode追加
+    let analyser = null;
+    if (this.vtsEnabled && window.vtsConnector && window.vtsConnector.isAuthenticated) {
+      analyser = this.audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      analyser.connect(this.audioContext.destination);
+    } else {
+      source.connect(this.audioContext.destination);
+    }
     
     return new Promise((resolve) => {
-      source.onended = resolve;
+      source.onended = () => {
+        // 再生終了時に口を閉じる
+        if (this.vtsEnabled && window.vtsConnector && window.vtsConnector.isAuthenticated) {
+          window.vtsConnector.setMouthOpen(0);
+        }
+        resolve();
+      };
+      
       source.start(0);
+      
+      // VTubeStudio口パクアニメーション開始
+      if (analyser) {
+        this.animateMouth(analyser, source);
+      }
     });
+  }
+  
+  animateMouth(analyser, source) {
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+    let animationFrameId = null;
+    
+    const updateMouth = () => {
+      // 音声再生が終了していたらアニメーション停止
+      if (source.playbackRate === 0 || !this.vtsEnabled) {
+        if (animationFrameId) {
+          cancelAnimationFrame(animationFrameId);
+        }
+        return;
+      }
+      
+      // 音量データ取得
+      analyser.getByteFrequencyData(dataArray);
+      
+      // 平均音量を計算（0-255範囲）
+      const sum = dataArray.reduce((a, b) => a + b, 0);
+      const average = sum / dataArray.length;
+      
+      // 音量を0-1の範囲に正規化（VTubeStudioパラメータ範囲）
+      const mouthValue = Math.min(1, average / 128);
+      
+      // VTubeStudioに口パクパラメータ送信
+      if (window.vtsConnector && window.vtsConnector.isAuthenticated) {
+        window.vtsConnector.setMouthOpen(mouthValue);
+      }
+      
+      // 次のフレーム
+      animationFrameId = requestAnimationFrame(updateMouth);
+    };
+    
+    updateMouth();
   }
   
   showNotification(title, message) {
