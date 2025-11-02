@@ -5,7 +5,8 @@
   "main": "vrm-bridge-server.js",
   "scripts": {
     "start": "node vrm-bridge-server.js",
-    "bridge": "node vrm-bridge-server.js"
+    "bridge": "node vrm-bridge-server.js",
+    "test": "node test-vrm-bridge.js"
   },
   "keywords": [
     "vrm",
