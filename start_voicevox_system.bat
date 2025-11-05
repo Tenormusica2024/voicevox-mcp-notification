@@ -34,9 +34,9 @@ REM 2. VRM Bridge Server起動確認（オプション）
 echo [2/4] Checking VRM Bridge Server (optional)...
 curl -s http://localhost:8765 >nul 2>&1
 if %errorlevel% neq 0 (
-    if exist "C:\Users\Tenormusica\vrm-bridge-server\index.js" (
+    if exist "%USERPROFILE%\vrm-bridge-server\index.js" (
         echo VRM Bridge Server not running. Starting...
-        start /B node "C:\Users\Tenormusica\vrm-bridge-server\index.js"
+        start /B node "%USERPROFILE%\vrm-bridge-server\index.js"
         timeout /t 5 /nobreak >nul
         echo VRM Bridge Server started.
     ) else (
@@ -49,7 +49,7 @@ echo.
 
 REM 3. 依存関係確認
 echo [3/4] Checking Node.js dependencies...
-cd "C:\Users\Tenormusica\voicevox-mcp-notification"
+cd "%USERPROFILE%\voicevox-mcp-notification"
 npm list >nul 2>&1
 if %errorlevel% neq 0 (
     echo Dependencies not installed. Running npm install...
@@ -75,6 +75,6 @@ echo.
 echo You can now use VOICEVOX MCP Notification in Claude Code.
 echo.
 echo To test the system, run:
-echo   node "C:\Users\Tenormusica\zundamon_speak.js" "Test message"
+echo   node "%USERPROFILE%\zundamon_speak.js" "Test message"
 echo.
 pause
