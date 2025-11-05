@@ -13,11 +13,12 @@ Write-Host ""
 $ErrorActionPreference = "Continue"
 
 # ログファイル設定
-$LogFile = "$env:TEMP\voicevox_startup_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
+$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+$LogFile = "$env:TEMP\voicevox_startup_$timestamp.log"
 function Write-Log {
     param($Message)
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    "$timestamp - $Message" | Add-Content -Path $LogFile
+    $logTimestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    "$logTimestamp - $Message" | Add-Content -Path $LogFile
     Write-Host $Message
 }
 
@@ -133,28 +134,37 @@ Write-Host ""
 # ========================================
 Write-Log "[2/5] Checking VRM Bridge Server (optional)..."
 
-try {
-    $response = Invoke-WebRequest -Uri "http://localhost:8765" -TimeoutSec 2 -UseBasicParsing
-    Write-Log "✓ VRM Bridge Server already running"
-} catch {
-    # VRM Bridge Serverのパス検索
-    $vrmBridgePath = "$env:USERPROFILE\vrm-bridge-server\index.js"
+# VRM Bridge Serverのパス検索
+$vrmBridgePath = "$env:USERPROFILE\vrm-bridge-server\index.js"
+
+if (Test-Path $vrmBridgePath) {
+    # プロセスベースの起動確認（より確実）
+    $vrmProcess = Get-Process -Name "node" -ErrorAction SilentlyContinue | Where-Object {
+        $_.CommandLine -like "*vrm-bridge-server*"
+    }
     
-    if (Test-Path $vrmBridgePath) {
+    if ($vrmProcess) {
+        Write-Log "✓ VRM Bridge Server already running (PID: $($vrmProcess.Id))"
+    } else {
         Write-Log "VRM Bridge Server not running. Starting..."
         Start-Process -FilePath "node" -ArgumentList $vrmBridgePath -WindowStyle Hidden
         Start-Sleep -Seconds 5
         
-        try {
-            $response = Invoke-WebRequest -Uri "http://localhost:8765" -TimeoutSec 2 -UseBasicParsing
-            Write-Log "✓ VRM Bridge Server started"
-        } catch {
-            Write-Log "⚠ VRM Bridge Server may not have started properly (this is optional)"
+        # 起動確認（HTTPエンドポイント + プロセス確認）
+        $vrmProcess = Get-Process -Name "node" -ErrorAction SilentlyContinue | Where-Object {
+            $_.CommandLine -like "*vrm-bridge-server*"
         }
-    } else {
-        Write-Log "⚠ VRM Bridge Server not found at: $vrmBridgePath"
-        Write-Log "  (VRM integration is optional - skipping)"
+        
+        if ($vrmProcess) {
+            Write-Log "✓ VRM Bridge Server started (PID: $($vrmProcess.Id))"
+            Write-Log "  Note: WebSocket connections are not tested (wscat not available)"
+        } else {
+            Write-Log "⚠ VRM Bridge Server may not have started properly"
+        }
     }
+} else {
+    Write-Log "⚠ VRM Bridge Server not found at: $vrmBridgePath"
+    Write-Log "  (VRM integration is optional - skipping)"
 }
 Write-Host ""
 
