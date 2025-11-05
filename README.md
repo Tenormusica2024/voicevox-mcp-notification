@@ -26,8 +26,15 @@ Claude Codeでのタスク実行時に、進捗や完了を音声で通知して
 
 ## インストール
 
+**⚠️ 注意:** 本プロジェクトはnpmパッケージとして公開されていません。ローカルインストールを使用してください。
+
 ```bash
-npm install -g @tenormusica/mcp-voicevox-notification
+# リポジトリをクローン
+git clone https://github.com/Tenormusica2024/voicevox-mcp-notification
+cd voicevox-mcp-notification
+
+# 依存関係インストール
+npm install
 ```
 
 ## MCP設定
@@ -41,12 +48,14 @@ Claude Codeの設定ファイルに以下を追加：
 {
   "mcpServers": {
     "voicevox": {
-      "command": "npx",
-      "args": ["@tenormusica/mcp-voicevox-notification"]
+      "command": "node",
+      "args": ["C:\\Users\\Tenormusica\\voicevox-mcp-notification\\index.js"]
     }
   }
 }
 ```
+
+**注意:** パスは絶対パスを使用してください。`npx`コマンドは使用できません（npmパッケージ未公開のため）。
 
 ## 使い方
 
@@ -87,17 +96,22 @@ notify_voice({
 `index.js`の以下の定数を変更することで、音声の設定を調整できます：
 
 ```javascript
-const DEFAULT_SPEAKER = 1;  // スピーカーID（ずんだもん=1）
+const DEFAULT_SPEAKER = 3;  // スピーカーID（ずんだもん ノーマル=3）
 const DEFAULT_SPEED_SCALE = 1.3;  // 再生速度（1.0が標準）
 ```
+
+**⚠️ 注意:** デフォルトのSpeaker IDは **3** です（ずんだもん ノーマル）。
 
 ### 対応スピーカー
 
 VOICEVOXで利用可能なスピーカーIDを指定できます：
-- 0: 四国めたん
-- 1: ずんだもん
-- 2: 春日部つむぎ
-- など
+- 3: ずんだもん ノーマル（デフォルト）
+- 1: 四国めたん
+- 8: 春日部つむぎ
+- 10: 雨晴はう
+- 詳細: http://localhost:50021/speakers
+
+**⚠️ 重要:** 本システムではSpeaker ID **3** (ずんだもん)を使用しています。ID 1と誤記されている箇所がありますが、正しくはID 3です。
 
 ## トラブルシューティング
 

@@ -64,6 +64,7 @@ Claude Code使用時にずんだもんの音声で結果報告・重要な回答
 **主要パラメータ:**
 - `VOICEVOX_API`: `http://localhost:50021`
 - `ZUNDAMON_SPEAKER_ID`: `3` (ずんだもん ノーマル)
+  - ⚠️ 他のドキュメントでID 1と記載されている箇所がありますが、正しくは **ID 3** です
 - `MAX_TEXT_LENGTH`: `200` (文字数制限)
 
 **実行コマンド:**
@@ -197,18 +198,67 @@ node "C:\Users\Tenormusica\zundamon_speak.js" "test.txt ファイルを作成し
 - Stop with matcher "*": GitHub Issue #2825 (Task tool破損)
 - UserPromptSubmit: GitHub Issue #8810 (サブディレクトリ問題)
 
+**根本原因の詳細:**
+1. **PostToolUse Hookの未実装:**
+   - Claude Codeのフック実装において、PostToolUseイベントが正しく発火していない
+   - GitHub Issueでは複数ユーザーから同様の報告あり
+   - 開発チームによる修正待ち
+
+2. **Stop Hookのバグ:**
+   - matcher "*"（すべてのツール）を指定すると、Task toolが破損する不具合
+   - 特定ツールのみを指定した場合でも動作しないケースあり
+
+3. **UserPromptSubmit Hookのサブディレクトリ問題:**
+   - `.claude`ディレクトリがプロジェクトルートにない場合、フックが認識されない
+   - 環境変数での設定も正しく動作しない
+
 **検証結果:**
 - 手動テスト: スクリプトは正常動作
 - Claude Code v1.0.72使用
 - 設定JSONは文法的に正しい
 - ログファイルは作成されない（フック未実行の証拠）
+- スクリプト単体実行では問題なく音声再生される
 
 **対応:**
 手動コマンド方式に切り替え（現行システム）
+- CLAUDE.mdにプロトコル明記
+- 重要な回答・タスク完了時に手動でBash tool実行
 
-## MCP Server統合（補助的）
+## VRM統合（オプション）
+
+### VRM Avatar連携
+
+**VRM (Virtual Reality Model)** は3Dアバターファイル形式で、音声通知に視覚的表現を追加できます。
+
+**主な機能:**
+- 口パクアニメーション（音声同期）
+- 表情変化（タスク状態に応じた感情表現）
+- モーション再生（手を振る・お辞儀等）
+
+**詳細:** `VRM_INTEGRATION.md` を参照
+
+### Bridge Server連携
+
+**VRM Bridge Server** は、VOICEVOX音声とVRMアバター表示を連携させる中継サーバーです。
+
+**機能:**
+- WebSocket通信でリアルタイム制御
+- リップシンク制御（音素タイミング同期）
+- 表情制御（タスク状態に応じた感情）
+- モーション制御（完了時・エラー時）
+
+**技術仕様:**
+- プロトコル: WebSocket (ws://)
+- ポート: 8765（デフォルト）
+- メッセージフォーマット: JSON
+
+**詳細:** `VRM_INTEGRATION.md` を参照
+
+## MCP Server統合（非推奨）
 
 ### VOICEVOX MCP Server
+
+**⚠️ 注意:** 現在は使用されていません。直接実行方式（`zundamon_speak.js`）を使用してください。
 
 **場所:** `C:\Users\Tenormusica\voicevox-mcp-notification\index.js`
 
@@ -217,21 +267,10 @@ node "C:\Users\Tenormusica\zundamon_speak.js" "test.txt ファイルを作成し
 - VOICEVOX APIラッパー
 - Claude CodeからMCP経由で音声合成
 
-**接続方法:**
-```bash
-claude mcp add --scope user voicevox node "C:\Users\Tenormusica\voicevox-mcp-notification\index.js"
-/mcp reconnect voicevox
-```
-
-**使用例:**
-```bash
-claude mcp call voicevox notify_voice '{"message": "テストメッセージ", "status": "start"}'
-```
-
 **現状:**
 - MCPサーバーは正常動作
 - 実際の運用では`zundamon_speak.js`直接実行を優先
-- MCPは補助的な位置づけ
+- MCPは補助的な位置づけ（現在は未使用）
 
 ## データフロー
 
@@ -265,14 +304,21 @@ claude mcp call voicevox notify_voice '{"message": "テストメッセージ", "
 **問題:**
 200文字を超える長いテキストは再生時間が35秒を超え、Bash toolがタイムアウト
 
+**技術的理由:**
+- Claude CodeのBash toolはデフォルトで35秒のタイムアウト設定
+- 音声合成（3-5秒）+ WAV生成（1-2秒）+ PowerShell起動（1秒）+ 再生時間（文字数依存）
+- 200文字 ≒ 30-35秒の再生時間 → タイムアウト発生
+
 **実際の動作:**
 - タイムアウトエラー表示: "Command timed out after 35s"
 - 音声再生は正常に完了 (exit code: 0)
 - 一時ファイルは正常に削除される
+- **重要:** タイムアウトはClaude Code側の制限であり、音声再生自体は問題なく完了
 
 **解決策:**
 - テキストを100-150文字程度に短縮
 - 非同期バックグラウンド実行（将来の改善）
+- `timeout`パラメータを60000ms（60秒）に設定（一時的対処）
 
 ## セキュリティ考慮事項
 
